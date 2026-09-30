@@ -244,25 +244,46 @@ class TextGenerator(Protocol):
 
 class OpenAIGenerator:
     def __init__(self, max_output_tokens: int = 300) -> None:
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        self.model = os.getenv("OPENAI_MODEL", "").strip()
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is missing from .env")
-        if not self.model:
-            raise RuntimeError("OPENAI_MODEL is missing from .env")
-        self.client = OpenAI(api_key=api_key)
+        gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        configured_openai_key = openai_api_key not in {"", "your_openai_api_key_here"}
+        self.provider = "gemini" if gemini_api_key else "openai"
+        if self.provider == "gemini":
+            self.model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+            self.client = OpenAI(
+                api_key=gemini_api_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                max_retries=5,
+                timeout=120.0,
+            )
+        else:
+            self.model = os.getenv("OPENAI_MODEL", "").strip()
+            if not configured_openai_key:
+                raise RuntimeError("Set GEMINI_API_KEY or a valid OPENAI_API_KEY in .env")
+            if not self.model:
+                raise RuntimeError("OPENAI_MODEL is missing from .env")
+            self.client = OpenAI(api_key=openai_api_key)
         self.max_output_tokens = max_output_tokens
 
     def generate(self, prompt: str) -> str:
-        response = self.client.responses.create(
-            model=self.model,
-            input=prompt,
-            temperature=0,
-            max_output_tokens=self.max_output_tokens,
-        )
-        answer = response.output_text.strip()
+        if self.provider == "gemini":
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=self.max_output_tokens,
+            )
+            answer = (response.choices[0].message.content or "").strip()
+        else:
+            response = self.client.responses.create(
+                model=self.model,
+                input=prompt,
+                temperature=0,
+                max_output_tokens=self.max_output_tokens,
+            )
+            answer = response.output_text.strip()
         if not answer:
-            raise RuntimeError("OpenAI returned an empty answer")
+            raise RuntimeError(f"{self.provider.title()} returned an empty answer")
         return answer
 
 
